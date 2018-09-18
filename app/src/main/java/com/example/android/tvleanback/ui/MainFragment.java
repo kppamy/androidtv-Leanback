@@ -17,9 +17,11 @@
 package com.example.android.tvleanback.ui;
 
 import android.app.LoaderManager;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.CursorLoader;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.Loader;
 import android.database.Cursor;
 import android.graphics.Bitmap;
@@ -27,6 +29,7 @@ import android.graphics.drawable.Drawable;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.UserHandle;
 import android.support.v17.leanback.app.BackgroundManager;
 import android.support.v17.leanback.app.BrowseFragment;
 import android.support.v17.leanback.widget.ArrayObjectAdapter;
@@ -44,6 +47,7 @@ import android.support.v17.leanback.widget.RowPresenter;
 import android.support.v4.app.ActivityOptionsCompat;
 import android.support.v4.content.ContextCompat;
 import android.util.DisplayMetrics;
+import android.util.Log;
 import android.view.View;
 import android.widget.Toast;
 
@@ -52,6 +56,7 @@ import com.bumptech.glide.request.RequestOptions;
 import com.bumptech.glide.request.target.SimpleTarget;
 import com.bumptech.glide.request.transition.Transition;
 import com.example.android.tvleanback.R;
+import com.example.android.tvleanback.Utils;
 import com.example.android.tvleanback.data.FetchVideoService;
 import com.example.android.tvleanback.data.VideoContract;
 import com.example.android.tvleanback.model.Video;
@@ -79,6 +84,9 @@ public class MainFragment extends BrowseFragment implements LoaderManager.Loader
     private Uri mBackgroundURI;
     private BackgroundManager mBackgroundManager;
     private static final int CATEGORY_LOADER = 123; // Unique ID for Category Loader.
+    public static final String PAIRING_CLINET = "PairingClient";
+    public static final String ACTION_PAIRING_STATUS="technicolor.android.action.REMOTE_PAIRING_STATUS_CHANGED";
+    public static final String EXTRA_KEY_PAIRING_STATUS = "extra_pairing_status";
 
     // Maps a Loader Id to its CursorObjectAdapter.
     private Map<Integer, CursorObjectAdapter> mVideoCursorAdapters;
@@ -113,6 +121,8 @@ public class MainFragment extends BrowseFragment implements LoaderManager.Loader
         setAdapter(mCategoryRowAdapter);
 
         updateRecommendations();
+
+        registerPairingStatusBroadcast();
     }
 
     @Override
@@ -122,6 +132,9 @@ public class MainFragment extends BrowseFragment implements LoaderManager.Loader
             mBackgroundTimer = null;
         }
         mBackgroundManager = null;
+
+        getActivity().unregisterReceiver(mPairingStatusReceiver);
+
         super.onDestroy();
     }
 
@@ -291,6 +304,7 @@ public class MainFragment extends BrowseFragment implements LoaderManager.Loader
                 gridRowAdapter.add(getString(R.string.guidedstep_first_title));
                 gridRowAdapter.add(getString(R.string.error_fragment));
                 gridRowAdapter.add(getString(R.string.personal_settings));
+                gridRowAdapter.add(PAIRING_CLINET);
                 ListRow row = new ListRow(gridHeader, gridRowAdapter);
                 mCategoryRowAdapter.add(row);
 
@@ -317,6 +331,34 @@ public class MainFragment extends BrowseFragment implements LoaderManager.Loader
         }
     }
 
+    private BroadcastReceiver mPairingStatusReceiver=new BroadcastReceiver(){
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            int status = intent.getIntExtra(EXTRA_KEY_PAIRING_STATUS,-1);
+            Log.i(Utils.TAG, "pairing action: " + intent.getAction() + " status: "+status);
+        }
+    };
+
+    private void registerPairingStatusBroadcast(){
+        IntentFilter pairing=new IntentFilter(ACTION_PAIRING_STATUS);
+        getActivity().registerReceiver(mPairingStatusReceiver,pairing);
+
+    }
+
+    private void startPairing(){
+        Intent intent = new Intent("technicolor.android.service.action.START_REMOTE_PAIRING");
+        intent.setPackage("com.technicolor.tv.remotepairing");
+        intent.putExtra("exclude_mode", true);
+        String target="";
+//        String target="98:F5:A9:1C:31:F4";
+//        intent.putExtra("remote_addr", "D1:07:19:FF:00:0D");
+        intent.putExtra("remote_addr", target);
+        getActivity().startService(intent);
+        Log.i(Utils.TAG, "Start remote pairing service to bond with RCU : " + target );
+    }
+
+
+
     private class UpdateBackgroundTask extends TimerTask {
 
         @Override
@@ -333,6 +375,8 @@ public class MainFragment extends BrowseFragment implements LoaderManager.Loader
     }
 
     private final class ItemViewClickedListener implements OnItemViewClickedListener {
+
+
         @Override
         public void onItemClicked(Presenter.ViewHolder itemViewHolder, Object item,
                 RowPresenter.ViewHolder rowViewHolder, Row row) {
@@ -370,13 +414,18 @@ public class MainFragment extends BrowseFragment implements LoaderManager.Loader
                             ActivityOptionsCompat.makeSceneTransitionAnimation(getActivity())
                                     .toBundle();
                     startActivity(intent, bundle);
-                } else {
+                }else if(((String) item).contains(PAIRING_CLINET)){
+                    startPairing();
+
+                }else{
+
                     Toast.makeText(getActivity(), ((String) item), Toast.LENGTH_SHORT)
                             .show();
                 }
             }
         }
     }
+
 
     private final class ItemViewSelectedListener implements OnItemViewSelectedListener {
         @Override

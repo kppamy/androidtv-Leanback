@@ -34,6 +34,7 @@ import java.util.HashMap;
  * A collection of utility methods, all static.
  */
 public class Utils {
+    public static final String TAG ="tv-leanback" ;
 
     public interface MediaDimensions {
         double MEDIA_HEIGHT = 0.95;
