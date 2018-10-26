@@ -27,6 +27,7 @@ import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.UserHandle;
@@ -85,6 +86,7 @@ public class MainFragment extends BrowseFragment implements LoaderManager.Loader
     private BackgroundManager mBackgroundManager;
     private static final int CATEGORY_LOADER = 123; // Unique ID for Category Loader.
     public static final String PAIRING_CLINET = "PairingClient";
+    public static final String EDID_CLINET = "EDID";
     public static final String ACTION_PAIRING_STATUS="technicolor.android.action.REMOTE_PAIRING_STATUS_CHANGED";
     public static final String EXTRA_KEY_PAIRING_STATUS = "extra_pairing_status";
 
@@ -123,6 +125,8 @@ public class MainFragment extends BrowseFragment implements LoaderManager.Loader
         updateRecommendations();
 
         registerPairingStatusBroadcast();
+
+        registerEDIDBroadcastReceiver();
     }
 
     @Override
@@ -134,6 +138,7 @@ public class MainFragment extends BrowseFragment implements LoaderManager.Loader
         mBackgroundManager = null;
 
         getActivity().unregisterReceiver(mPairingStatusReceiver);
+        getActivity().unregisterReceiver(mHdmiPlugReceiver);
 
         super.onDestroy();
     }
@@ -305,6 +310,7 @@ public class MainFragment extends BrowseFragment implements LoaderManager.Loader
                 gridRowAdapter.add(getString(R.string.error_fragment));
                 gridRowAdapter.add(getString(R.string.personal_settings));
                 gridRowAdapter.add(PAIRING_CLINET);
+                gridRowAdapter.add(EDID_CLINET);
                 ListRow row = new ListRow(gridHeader, gridRowAdapter);
                 mCategoryRowAdapter.add(row);
 
@@ -345,10 +351,11 @@ public class MainFragment extends BrowseFragment implements LoaderManager.Loader
 
     }
 
+
     private void startPairing(){
         Intent intent = new Intent("technicolor.android.service.action.START_REMOTE_PAIRING");
         intent.setPackage("com.technicolor.tv.remotepairing");
-        intent.putExtra("exclude_mode", true);
+//        intent.putExtra("exclude_mode", true);
         String target="";
 //        String target="98:F5:A9:1C:31:F4";
 //        intent.putExtra("remote_addr", "D1:07:19:FF:00:0D");
@@ -357,6 +364,72 @@ public class MainFragment extends BrowseFragment implements LoaderManager.Loader
         Log.i(Utils.TAG, "Start remote pairing service to bond with RCU : " + target );
     }
 
+    //do not use import class unless we want to build with policy.jar
+    private final static String ACTION_HDMI_AUDIO_PLUG = "android.media.action.HDMI_AUDIO_PLUG";
+    private final static String EXTRA_HDMI_AUDIO_PLUG_STATE = "android.media.extra.AUDIO_PLUG_STATE";
+    private BroadcastReceiver mHdmiPlugReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            boolean plugged = false;
+            if(intent.hasExtra(EXTRA_HDMI_AUDIO_PLUG_STATE)) {
+                plugged = intent.getIntExtra(EXTRA_HDMI_AUDIO_PLUG_STATE, 0) == 1;
+            }
+            Log.i(Utils.TAG,"on ACTION_HDMI_AUDIO_PLUG, plugged = " + plugged);
+
+            if (!plugged) {
+                return;
+            }
+
+            getEDID();
+
+        }
+    };
+
+
+    private void registerEDIDBroadcastReceiver(){
+        IntentFilter hdmiActionFilter = new IntentFilter();
+        hdmiActionFilter.addAction(ACTION_HDMI_AUDIO_PLUG);
+        getActivity().registerReceiver(mHdmiPlugReceiver, hdmiActionFilter);
+    }
+
+
+    private void getEDID(){
+        try {
+            Cursor cursor = getActivity().getContentResolver().query(
+                    Uri.parse("content://technicolor/display"),
+                    null,
+                    "name=?",
+                    new String[] {"raw_edid", "extended_edid"},
+                    null);
+            if (cursor != null && cursor.getCount() > 0) {
+                cursor.moveToPosition(-1);
+                while (cursor.moveToNext()) {
+                    String name = cursor.getString(cursor.getColumnIndex("name"));
+                    if ("raw_edid".equals(name)) {
+                        byte[] raw_edid = cursor.getBlob(cursor.getColumnIndex("value"));
+                        int l1 = (raw_edid[8] & 0b01111100) >> 2;
+                        int l2 = ((raw_edid[8] & 0b00000011) << 3) | ((raw_edid[9] & 0b11100000) >> 5);
+                        int l3 = raw_edid[9] & 0b11111;
+                        char c1 = (char) ('@' + l1);
+                        char c2 = (char) ('@' + l2);
+                        char c3 = (char) ('@' + l3);
+                        String TVBrand = new String(new char[] {c1, c2 ,c3});
+                        Log.d(Utils.TAG, String.format("Read TV brand from EDID info : %s", TVBrand));
+                        Toast.makeText(getActivity(), String.format("TV brand : %s", TVBrand), Toast.LENGTH_SHORT)
+                                    .show();
+                        /**
+                         * TODO: compare the new EDID info with the current info stored when TV/AVR IR configuration is set.
+                         * And ask end user to reconfigure the IR code base again.
+                         */
+                        break;
+                    }
+                }
+                cursor.close();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
 
 
     private class UpdateBackgroundTask extends TimerTask {
@@ -375,8 +448,6 @@ public class MainFragment extends BrowseFragment implements LoaderManager.Loader
     }
 
     private final class ItemViewClickedListener implements OnItemViewClickedListener {
-
-
         @Override
         public void onItemClicked(Presenter.ViewHolder itemViewHolder, Object item,
                 RowPresenter.ViewHolder rowViewHolder, Row row) {
@@ -416,9 +487,10 @@ public class MainFragment extends BrowseFragment implements LoaderManager.Loader
                     startActivity(intent, bundle);
                 }else if(((String) item).contains(PAIRING_CLINET)){
                     startPairing();
-
-                }else{
-
+                }else if(((String) item).contains(EDID_CLINET)){
+                    getEDID();
+                }
+                else{
                     Toast.makeText(getActivity(), ((String) item), Toast.LENGTH_SHORT)
                             .show();
                 }
